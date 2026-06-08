@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aero-pose"
+version = "0.1.0"
+description = "Camera-agnostic multi-person ergonomic monitoring system"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy<2.0",
+    "opencv-python>=4.8",
+    "torch>=2.0",
+    "ultralytics>=8.0",
+    "pydantic>=2.0",
+    "pyyaml",
+    "typer",
+    "scipy",
+    "onnxruntime",
+]
+
+[tool.setuptools.packages.find]
+include = ["aero_pose*"]
+
+[project.scripts]
+aero-pose = "aero_pose.main:app"

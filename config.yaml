@@ -1,0 +1,24 @@
+camera:
+  source: 0
+  frame_width: 640
+  frame_height: 480
+
+detection:
+  model_size: n
+  conf_threshold: 0.5
+  device: cpu
+
+lifting:
+  model_path: models/videopose3d_243.bin
+  temporal_window: 243
+  device: cpu
+
+ergonomics:
+  reba_threshold: 8
+  smoothing_alpha: 0.3
+  load_weight_kg: 0.0
+
+feedback:
+  show_fps: true
+  show_skeleton: true
+  fullscreen: false
