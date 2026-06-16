@@ -1,13 +1,25 @@
 from pathlib import Path
 import cv2
 import numpy as np
+import sys
 
 
 class CameraCapture:
     def __init__(self, source: int | str | Path) -> None:
         if isinstance(source, str) and source.isdigit():
             source = int(source)
-        self._cap = cv2.VideoCapture(source if isinstance(source, int) else str(source))
+
+        # On Windows, the default MSMF backend often encounters 'can't grab frame' errors.
+        # Forcing DirectShow (CAP_DSHOW) usually resolves these hardware synchronization issues.
+        if isinstance(source, int) and sys.platform.startswith("win"):
+            self._cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+            # Fallback to default backend if DSHOW fails to initialize
+            if not self._cap.isOpened():
+                self._cap.release()
+                self._cap = cv2.VideoCapture(source)
+        else:
+            self._cap = cv2.VideoCapture(source if isinstance(source, int) else str(source))
+
         if not self._cap.isOpened():
             raise RuntimeError(f"Failed to open camera source: {source}")
         self._source = source

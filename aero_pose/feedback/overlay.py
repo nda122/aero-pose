@@ -29,8 +29,10 @@ class OverlayRenderer:
     def __init__(self) -> None:
         self._joint_radius = 4
         self._line_thickness = 2
-        self._vp_size = 220
-        self._auto_rotate_deg: float = 0.0
+        self._vp_size = 180
+        self.azimuth: float = 35.0
+        self.elevation: float = 15.0
+        self._panel_w = 300 # Increased panel width for better spacing
 
     def draw(
         self,
@@ -41,42 +43,56 @@ class OverlayRenderer:
         fps: float | None = None,
         warmup: bool = False,
         warmup_progress: int = 0,
+        azimuth: float | None = None,
+        elevation: float | None = None,
     ) -> np.ndarray:
-        display = frame.copy()
-        h, w = display.shape[:2]
+        h, w = frame.shape[:2]
+        # Create new canvas: Camera on the left + Panel on the right
+        display = np.zeros((h, w + self._panel_w, 3), dtype=np.uint8)
+        
+        cam_view = frame.copy()
 
         if warmup:
             self._draw_text(
-                display,
+                cam_view,
                 f"Warming up 3D lifter... ({warmup_progress}/243)",
-                (w // 2 - 130, 30),
+                (w // 2 - 140, 40),
                 (255, 255, 255),
-                0.7,
+                0.5,
+                1
             )
 
         if keypoints_2d is not None and keypoints_2d.shape[0] >= 17:
             kp = keypoints_2d if keypoints_2d.shape[-1] == 2 else keypoints_2d[:, :2]
-            self._draw_2d_skeleton(display, kp, reba_result)
+            self._draw_2d_skeleton(cam_view, kp, reba_result)
         else:
             self._draw_text(
-                display,
+                cam_view,
                 "No person detected",
                 (w // 2 - 100, h // 2),
                 (128, 128, 128),
                 0.8,
             )
 
+        display[:, :w] = cam_view # Place camera view on the left
+
         if joints_3d is not None:
-            self._auto_rotate_deg = (self._auto_rotate_deg + 0.5) % 360
+            if azimuth is not None:
+                self.azimuth = azimuth
+            if elevation is not None:
+                self.elevation = elevation
+                
             self._draw_3d_viewport(display, joints_3d, reba_result)
 
         if reba_result is not None:
             self._draw_reba_badge(display, reba_result)
-            self._draw_info_panel(display, reba_result)
 
         if fps is not None:
-            self._draw_text(display, f"FPS: {fps:.1f}", (10, 25),
-                            (255, 255, 255), 0.6)
+            # Draw FPS box at the bottom-left of the camera view
+            cv2.rectangle(display, (10, h - 35), (120, h - 10), (20, 20, 20), -1) # Dark background
+            cv2.rectangle(display, (10, h - 35), (120, h - 10), (76, 175, 80), 1) # Green border
+            self._draw_text(display, f"FPS: {int(fps)}", (20, h - 17), # Text position
+                            (76, 175, 80), 0.45, 1)
 
         return display
 
@@ -137,28 +153,30 @@ class OverlayRenderer:
         joints_3d: np.ndarray,
         reba_result: REBAResult | None,
     ) -> None:
-        h, w = display.shape[:2]
+        h, full_w = display.shape[:2]
+        w = full_w - self._panel_w
         vs = self._vp_size
-        ox, oy = 10, h - vs - 10
 
-        cv2.rectangle(display, (ox, oy), (ox + vs, oy + vs), (15, 15, 30), -1)
-        border_color = reba_result.risk_level.color if reba_result else (80, 80, 80)
-        cv2.rectangle(display, (ox, oy), (ox + vs, oy + vs), border_color, 1)
+        ox = w + (self._panel_w - vs) // 2
+        oy = 265
 
-        self._draw_text(display, "3D VIEW", (ox + 5, oy + 15),
-                        (180, 180, 180), 0.45)
+        cv2.rectangle(display, (ox, oy), (ox + vs, oy + vs), (10, 10, 20), -1)
+        color = reba_result.risk_level.color if reba_result else (100, 100, 100)
+        cv2.rectangle(display, (ox, oy), (ox + vs, oy + vs), color, 1, cv2.LINE_AA)
 
-        az = (-70.0 + self._auto_rotate_deg) % 360
+        self._draw_text(display, "3D SPATIAL RECONSTRUCTION", (ox, oy - 10),
+                        (180, 180, 180), 0.35)
+
         pts = project_3d_to_viewport(
-            joints_3d, vs, elevation_deg=15.0, azimuth_deg=az
+            joints_3d, vs, elevation_deg=self.elevation, azimuth_deg=self.azimuth
         )
 
         cx, cy = ox + vs // 2, oy + vs // 2
         pts[:, 0] += cx
         pts[:, 1] += cy
 
-        self._draw_floor_grid(display, pts, joints_3d, cx, cy, az)
-
+        self._draw_floor_grid(display, pts, joints_3d, cx, cy, self.azimuth, self.elevation)
+        
         colors = reba_result.region_colors if reba_result else {}
         dim = (80, 80, 80)
 
@@ -183,6 +201,7 @@ class OverlayRenderer:
         cx: int,
         cy: int,
         azimuth_deg: float,
+        elevation_deg: float,
     ) -> None:
         vs = self._vp_size
         n = 5
@@ -200,7 +219,7 @@ class OverlayRenderer:
         centroid = joints_3d.mean(axis=0)
         centered = grid_3d - centroid
         a_az = np.radians(azimuth_deg)
-        a_el = np.radians(15.0)
+        a_el = np.radians(elevation_deg)
         R = np.array([
             [np.cos(a_az), np.sin(a_az) * np.sin(a_el),
              np.sin(a_az) * np.cos(a_el)],
@@ -252,24 +271,40 @@ class OverlayRenderer:
                             (px + 28, y + 9), (220, 220, 220), 0.5)
 
     def _draw_reba_badge(self, display: np.ndarray, result: REBAResult) -> None:
-        h, w = display.shape[:2]
+        h, full_w = display.shape[:2]
+        w = full_w - self._panel_w
         color = result.risk_level.color
         label = result.risk_level.label
+        
+        # Position at the top of the right panel
+        bx = w + 20 # X-offset from camera view width
+        by = 20 # Y-offset from top
 
-        bx = w - 240
-        by = 10
+        self._draw_text(display, "REAL-TIME ERGONOMIC MONITOR", (bx, by), (150, 150, 150), 0.35)
+        self._draw_text(display, "AERO-POSE", (bx, by + 20), (255, 255, 255), 0.5, 2) # Main title
 
-        cv2.rectangle(display, (bx, by), (bx + 230, by + 105), (0, 0, 0), -1)
-        cv2.rectangle(display, (bx, by), (bx + 230, by + 105), color, 2)
+        # REBA Score (Main Badge)
+        score_y = by + 75 # Y position for the score
+        self._draw_text(display, f"{result.final_score}", (bx + 40, score_y), color, 2.0, 3) # Score text
+        
+        # Risk Label
+        label_y = score_y + 30 # Y position for the risk label
+        cv2.rectangle(display, (bx, label_y), (bx + self._panel_w - 40, label_y + 20), color, -1) # Background rectangle
+        self._draw_text(display, label, (bx + 12, label_y + 15), (255, 255, 255), 0.38, 2) # Risk label text
 
-        self._draw_text(display, f"REBA: {result.final_score}",
-                        (bx + 10, by + 28), color, 0.85, 2)
-        self._draw_text(display, f"Risk: {label}",
-                        (bx + 10, by + 50), color, 0.65)
-        self._draw_text(display, f"A:{result.score_a} B:{result.score_b} C:{result.score_c}",
-                        (bx + 10, by + 72), (200, 200, 200), 0.55)
-        self._draw_text(display, f"T:{result.trunk_score} N:{result.neck_score} L:{result.leg_score}",
-                        (bx + 10, by + 92), (150, 150, 150), 0.5)
+        # Detailed scores (Breakdown)
+        dy = label_y + 50 # Starting Y position for breakdown details
+        self._draw_text(display, "SYSTEM BREAKDOWN", (bx, dy - 10), (130, 130, 130), 0.35) # Breakdown title
+        
+        # Group A
+        self._draw_text(display, f"TRUNK:{result.trunk_score} NECK:{result.neck_score} LEG:{result.leg_score}", 
+                        (bx, dy + 12), (200, 200, 200), 0.38) # Group A scores
+        # Group B
+        self._draw_text(display, f"U-ARM:{result.upper_arm_score} L-ARM:{result.lower_arm_score} WRIST:{result.wrist_score}", 
+                        (bx, dy + 28), (200, 200, 200), 0.38) # Group B scores
+        # Tables
+        self._draw_text(display, f"TABLES A:{result.score_a} B:{result.score_b} C:{result.score_c}", 
+                        (bx, dy + 48), (76, 175, 80), 0.38) # Table scores
 
     @staticmethod
     def _draw_text(

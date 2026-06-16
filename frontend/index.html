@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>AERO-POSE Dashboard</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+<style>
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: #0f1117;
+    color: white;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    height: 100vh;
+    overflow: hidden;
+}
+
+#root {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+}
+
+#camera-panel {
+    flex: 1;
+    position: relative;
+    background: black;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#video-bg {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: black;
+}
+
+#svg-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+#sidebar {
+    width: 290px;
+    background: #161b22;
+    border-left: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+    padding: 18px;
+    overflow-y: auto;
+}
+
+.header-small {
+    color: #8b949e;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+
+.header-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-top: 4px;
+    margin-bottom: 20px;
+}
+
+.reba-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+    transition: all 0.3s ease;
+}
+
+.reba-title {
+    font-size: 11px;
+    color: #8b949e;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+}
+
+.reba-score {
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+}
+
+.risk-label {
+    margin-top: 10px;
+    padding: 8px;
+    text-align: center;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+}
+
+.section {
+    margin-top: 16px;
+}
+
+.section-title {
+    color: #8b949e;
+    font-size: 11px;
+    margin-bottom: 10px;
+    letter-spacing: 0.5px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    background: #1f242c;
+    padding: 6px 10px;
+    border-radius: 6px;
+}
+
+.value {
+    font-weight: 700;
+}
+
+#viewport-3d {
+    height: 240px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #30363d;
+    background: #0d1117;
+}
+
+#fps-box {
+    margin-top: auto;
+    padding: 10px;
+    border-radius: 8px;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+}
+
+#fps-val {
+    color: #4CAF50;
+    font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<div id="root">
+    <div id="camera-panel">
+        <img id="video-bg" alt="Stream Camera">
+        <svg id="svg-layer"></svg>
+    </div>
+
+    <div id="sidebar">
+        <div class="header-small">REAL-TIME ERGONOMIC MONITOR</div>
+        <div class="header-title">AERO-POSE</div>
+
+        <div class="reba-card">
+            <div class="reba-title">REBA SCORE</div>
+            <div class="reba-score" id="reba-score">--</div>
+            <div class="risk-label" id="risk-level">WAITING...</div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">SYSTEM BREAKDOWN</div>
+            <div class="detail-row">
+                <span>Trunk / Neck / Legs</span>
+                <span class="value" id="score-tnl">0 / 0 / 0</span>
+            </div>
+            <div class="detail-row">
+                <span>Upper / Lower / Wrist</span>
+                <span class="value" id="score-alw">0 / 0 / 0</span>
+            </div>
+            <div class="detail-row">
+                <span>Table A / B / C</span>
+                <span class="value" id="score-abc">0 / 0 / 0</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">3D SPATIAL RECONSTRUCTION</div>
+            <div id="viewport-3d"></div>
+        </div>
+
+        <div id="fps-box">
+            <span>LIVE MONITOR</span>
+            <span>FPS: <span id="fps-val">0</span></span>
+        </div>
+    </div>
+</div>
+
+<script>
+const COCO_EDGES = [[5,6],[5,7],[7,9],[6,8],[8,10],[5,11],[6,12],[11,13],[13,15],[12,14],[14,16],[11,12]];
+const H36M_EDGES = [[0,7],[7,8],[8,9],[9,10],[8,11],[11,12],[12,13],[8,14],[14,15],[15,16],[0,1],[1,2],[2,3],[0,4],[4,5],[5,6]];
+
+const svg = document.getElementById("svg-layer");
+const img = document.getElementById("video-bg");
+let ws;
+
+function connectWS() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onopen = () => console.log("WS Connected");
+    ws.onclose = () => {
+        console.log("WS Closed. Reconnecting...");
+        setTimeout(connectWS, 1000);
+    };
+    ws.onerror = () => ws.close();
+    ws.onmessage = handleMessage;
+}
+connectWS();
+
+// ---------------- THREE.JS INITIALIZATION ----------------
+const viewport = document.getElementById("viewport-3d");
+const scene = new THREE.Scene();
+const camera3d = new THREE.PerspectiveCamera(60, viewport.clientWidth / viewport.clientHeight, 0.1, 100);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+renderer.setPixelRatio(window.devicePixelRatio);
+viewport.appendChild(renderer.domElement);
+
+camera3d.position.set(1.2, 0.8, 2.0);
+const controls = new THREE.OrbitControls(camera3d, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 0.5;
+controls.maxDistance = 5.0;
+
+const grid = new THREE.GridHelper(3.0, 14, 0x444444, 0x222222);
+grid.position.y = -0.6;
+scene.add(grid);
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+
+const group = new THREE.Group();
+scene.add(group);
+
+let spheres = [];
+let lines = [];
+
+// Initialize static 3D object structures (avoid reallocating memory).
+function init3DObjects() {
+    const sphereGeo = new THREE.SphereGeometry(0.04, 16, 16);
+    const sphereMat = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+    
+    for (let i = 0; i < 17; i++) {
+        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+        group.add(sphere);
+        spheres.push(sphere);
+    }
+
+    const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+    H36M_EDGES.forEach(() => {
+        // Initialize a fixed empty buffer
+        const lineGeo = new THREE.BufferGeometry();
+        const positions = new Float32Array(6); // 2 points * 3 coordinates
+        lineGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        
+        const line = new THREE.Line(lineGeo, lineMat);
+        group.add(line);
+        lines.push(line);
+    });
+}
+init3DObjects();
+
+function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera3d);
+}
+animate();
+
+// Resize windows for 3D structure
+window.addEventListener('resize', () => {
+    camera3d.aspect = viewport.clientWidth / viewport.clientHeight;
+    camera3d.updateProjectionMatrix();
+    renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+});
+
+// ---------------- DATA HANDLING & SYNCHRONIZATION ----------------
+let pendingPayload = null;
+
+function handleMessage(event) {
+    const payload = JSON.parse(event.data);
+    document.getElementById("fps-val").innerText = Math.round(payload.fps || 0);
+
+    if (!payload.data) return;
+
+    if (payload.frame) {
+        // Save data payload
+        pendingPayload = payload;
+        // Enable image source
+        img.src = "data:image/jpeg;base64," + payload.frame;
+    } else {
+        renderPayload(payload);
+    }
+}
+
+// Ensure perfect SVG synchronization with image
+img.onload = () => {
+    if (pendingPayload) {
+        renderPayload(pendingPayload);
+        pendingPayload = null;
+    }
+};
+
+function renderPayload(payload) {
+    const reba = payload.data.reba;
+
+    // Update the REBA UI metrics
+    if (reba) {
+        const scoreEl = document.getElementById("reba-score");
+        const riskEl = document.getElementById("risk-level");
+        
+        scoreEl.innerText = reba.score;
+        scoreEl.style.color = reba.color;
+        
+        riskEl.innerText = reba.risk;
+        riskEl.style.background = reba.color;
+
+        const b = reba.breakdown;
+        document.getElementById("score-tnl").innerText = `${b.trunk} / ${b.neck} / ${b.legs}`;
+        document.getElementById("score-alw").innerText = `${b.upper_arm} / ${b.lower_arm} / ${b.wrist}`;
+        document.getElementById("score-abc").innerText = `${b.score_a} / ${b.score_b} / ${b.score_c}`;
+    }
+
+    // ---------- OPTIMIZE RENDER 2D SVG ----------
+    const kp = payload.data.kp_2d;
+    if (kp && kp.length > 0) {
+        let svgContent = '';
+        const strokeColor = reba ? reba.color : '#00ffff';
+
+        COCO_EDGES.forEach(([i, j]) => {
+            if (kp[i] && kp[j]) {
+                svgContent += `<line x1="${kp[i][0]}" y1="${kp[i][1]}" x2="${kp[j][0]}" y2="${kp[j][1]}" stroke="${strokeColor}" stroke-width="3" />`;
+            }
+        });
+
+        kp.forEach(p => {
+            if (p) {
+                svgContent += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="#00ffff" />`;
+            }
+        });
+
+        svg.innerHTML = svgContent;
+        svg.setAttribute("viewBox", `0 0 ${payload.frame_w} ${payload.frame_h}`);
+    }
+
+    // ---------- OPTIMIZE RENDER 3D (Prevent Memory Leak) ----------
+    const k3d = payload.data.kp_3d;
+    if (!k3d || k3d.length === 0) return;
+
+    const pelvis = k3d[0];
+    // Normalize the origin coordinates
+    const centered = k3d.map(p => [
+        (p[0] - pelvis[0]) * 0.6,
+        (p[1] - pelvis[1]) * 0.6,
+        (p[2] - pelvis[2]) * 0.6
+    ]);
+
+    // Update spherical nodes position
+    centered.forEach((p, i) => {
+        if (spheres[i]) {
+            spheres[i].position.set(p[0], -p[1], -p[2]); 
+        }
+    });
+
+    H36M_EDGES.forEach(([i, j], idx) => {
+        const line = lines[idx];
+        if (line && centered[i] && centered[j]) {
+            const posAttr = line.geometry.attributes.position;
+            
+            // Update first point (i)
+            posAttr.array[0] = centered[i][0];
+            posAttr.array[1] = -centered[i][1];
+            posAttr.array[2] = -centered[i][2];
+            
+            // Update last point (j)
+            posAttr.array[3] = centered[j][0];
+            posAttr.array[4] = -centered[j][1];
+            posAttr.array[5] = -centered[j][2];
+            
+            // Render again
+            posAttr.needsUpdate = true;
+        }
+    });
+}
+</script>
+
+</body>
+</html>
