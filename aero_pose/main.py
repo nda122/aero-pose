@@ -2,6 +2,7 @@ import time
 from pathlib import Path
 
 import cv2
+import numpy as np
 import typer
 
 from aero_pose.config.settings import AeroPoseConfig
@@ -29,6 +30,30 @@ def _resolve_model_path(path: str) -> Path:
     if alt2.exists():
         return alt2
     return p
+
+
+class InteractionState:
+    def __init__(self):
+        self.mouse_down = False
+        self.last_x = 0
+        self.last_y = 0
+        self.azimuth = 35.0
+        self.elevation = 15.0
+
+
+def mouse_callback(event, x, y, flags, state: InteractionState) -> None:
+    if event == cv2.EVENT_LBUTTONDOWN:
+        state.mouse_down = True
+        state.last_x, state.last_y = x, y
+    elif event == cv2.EVENT_LBUTTONUP:
+        state.mouse_down = False
+    elif event == cv2.EVENT_MOUSEMOVE:
+        if state.mouse_down:
+            dx = x - state.last_x
+            dy = y - state.last_y
+            state.azimuth = (state.azimuth + dx * 0.5) % 360
+            state.elevation = np.clip(state.elevation - dy * 0.5, -90, 90)
+            state.last_x, state.last_y = x, y
 
 
 @app.command()
@@ -90,6 +115,14 @@ def run(
     warmup = True
     last_warmup_frame = 0
 
+    cv2.namedWindow("AERO-POSE", cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    if cfg.feedback.fullscreen:
+        cv2.setWindowProperty("AERO-POSE", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+    cv2.setWindowTitle("AERO-POSE", "AERO-POSE | Medical-Grade Ergonomics")
+
+    interaction = InteractionState()
+    cv2.setMouseCallback("AERO-POSE", mouse_callback, interaction)
+
     with camera:
         while camera.is_opened():
             t_start = time.perf_counter()
@@ -130,6 +163,8 @@ def run(
                 fps=fps,
                 warmup=warmup,
                 warmup_progress=lifter.buffer_size,
+                azimuth=interaction.azimuth,
+                elevation=interaction.elevation,
             )
 
             cv2.imshow("AERO-POSE", display)

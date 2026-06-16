@@ -69,6 +69,22 @@ aero-pose run --model s
 
 Press `q` or `Esc` to quit.
 
+### Interactive Controls (OpenCV UI)
+The OpenCV UI now features an interactive dashboard layout with the camera feed on the left and detailed ergonomic information on the right.
+
+- **Mouse Drag (Left Click)**: Click and drag on the 3D viewport to rotate the 3D human model (adjusting azimuth and elevation).
+- **`q` / `Esc`**: Quit the application.
+
+### Web Dashboard
+The system now supports a real-time Web Dashboard interface using FastAPI and Three.js, offering a modern and interactive experience.
+
+```bash
+# Start the FastAPI server
+python -m aero_pose.api.server
+```
+
+Access the dashboard at `http://localhost:8000` in your web browser. It features smooth 3D rotation, synchronized 2D/3D overlays, and detailed REBA scores.
+
 ---
 
 ## System Architecture
@@ -94,6 +110,8 @@ aero_pose/
 │   ├── angles.py             # Joint angle computation from 3D bone vectors
 │   ├── reba.py               # REBA scoring (5 tables, midpoint ranges)
 │   └── risk.py               # Risk level classification + color mapping
+├── api/
+│   └── server.py             # FastAPI WebSocket server for Web Dashboard
 └── feedback/
     └── overlay.py            # Real-time skeleton + score overlay
 ```

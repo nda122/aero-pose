@@ -29,12 +29,18 @@ class FeedbackConfig(BaseModel):
     show_skeleton: bool = True
     fullscreen: bool = False
 
+class WebConfig(BaseModel):
+    host: str = "0.0.0.0"
+    port: int = 8000
+    stream_fps: int = 30
+
 class AeroPoseConfig(BaseModel):
     camera: CameraConfig = CameraConfig()
     detection: DetectionConfig = DetectionConfig()
     lifting: LiftingConfig = LiftingConfig()
     ergonomics: ErgonomicsConfig = ErgonomicsConfig()
     feedback: FeedbackConfig = FeedbackConfig()
+    web: WebConfig = WebConfig()
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AeroPoseConfig":
